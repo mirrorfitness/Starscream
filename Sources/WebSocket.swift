@@ -426,6 +426,8 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
     public var currentURL: URL { return request.url! }
 
     public var respondToPingWithPong: Bool = true
+    
+    public var trust: (SecTrust?, String?) { return stream.sslTrust() }
 
     // MARK: - Private
 
@@ -441,6 +443,7 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
     }
     
     private var stream: WSStream
+    private var rootCert: SecCertificate?
     private var connected = false
     private var isConnecting = false
     private let mutex = NSLock()
@@ -479,10 +482,11 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
         writeQueue.maxConcurrentOperationCount = 1
     }
     
-    public convenience init(url: URL, protocols: [String]? = nil) {
+    public convenience init(url: URL, protocols: [String]? = nil, rootCert: SecCertificate? = nil) {
         var request = URLRequest(url: url)
         request.timeoutInterval = 5
         self.init(request: request, protocols: protocols)
+        self.rootCert = rootCert
     }
 
     // Used for specifically setting the QOS for the write queue.
@@ -618,7 +622,7 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
         }
         httpBody += "\r\n"
         
-        initStreamsWithData(httpBody.data(using: .utf8)!, Int(port!))
+        initStreamsWithData(httpBody.data(using: .utf8)!, Int(port!), rootCert: rootCert)
         advancedDelegate?.websocketHttpUpgrade(socket: self, request: httpBody)
     }
 
@@ -640,7 +644,7 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
     /**
      Start the stream connection and write the data to the output stream.
      */
-    private func initStreamsWithData(_ data: Data, _ port: Int) {
+    private func initStreamsWithData(_ data: Data, _ port: Int, rootCert: SecCertificate? = nil) {
 
         guard let url = request.url else {
             disconnectStream(nil, runDelegate: true)
@@ -682,18 +686,33 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
                 #if os(Linux) || os(watchOS)
                     s.certValidated = false
                 #else
-                    if let sec = s.security, !s.certValidated {
-                        let trustObj = s.stream.sslTrust()
-                        if let possibleTrust = trustObj.trust {
-                            s.certValidated = sec.isValid(possibleTrust, domain: trustObj.domain)
-                        } else {
-                            s.certValidated = false
-                        }
-                        if !s.certValidated {
-                            s.disconnectStream(WSError(type: .invalidSSLError, message: "Invalid SSL certificate", code: 0))
-                            return
-                        }
-                    }
+                guard let sec = s.security, !s.certValidated else { return }
+                let trustObj = s.stream.sslTrust()
+                
+                if
+                    let possibleTrust = trustObj.trust,
+                    let rootCert = rootCert,
+                    let rootTrust = self?.addAnchorToTrust(
+                        trust: possibleTrust,
+                        certificate: rootCert) {
+                    
+                    s.certValidated = sec.isValid(
+                        rootTrust,
+                        domain: trustObj.domain
+                    )
+                } else {
+                    s.certValidated = false
+                }
+                if !s.certValidated {
+                    s.disconnectStream(
+                        WSError(
+                            type: .invalidSSLError,
+                            message: "Invalid SSL certificate",
+                            code: 0
+                        )
+                    )
+                    return
+                }
                 #endif
                 let _ = s.stream.write(data: data)
             }
@@ -703,6 +722,17 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
         self.mutex.lock()
         self.readyToWrite = true
         self.mutex.unlock()
+    }
+    
+    // Add a trusted root CA to out SecTrust object
+    private func addAnchorToTrust(trust: SecTrust, certificate: SecCertificate) -> SecTrust {
+        let array: NSMutableArray = NSMutableArray()
+        
+        array.add(certificate)
+        
+        SecTrustSetAnchorCertificates(trust, array)
+        
+        return trust
     }
 
     /**
