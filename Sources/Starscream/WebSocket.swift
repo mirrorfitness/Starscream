@@ -328,11 +328,6 @@ open class FoundationStream : NSObject, WSStream, StreamDelegate  {
                     anchorAdded,
                     forKey: Stream.PropertyKey(kAnchorAlreadyAdded)
                 )
-
-                outputStream?.setProperty(
-                    anchorAdded,
-                    forKey: Stream.PropertyKey(kAnchorAlreadyAdded)
-                )
             }
 
             //  Now evaluate the certificate chain of trust
@@ -361,14 +356,14 @@ open class FoundationStream : NSObject, WSStream, StreamDelegate  {
      */
     open func stream(_ aStream: Stream, handle eventCode: Stream.Event) {
         if eventCode == .hasBytesAvailable {
-            if aStream == inputStream {
+            if aStream == inputStream, let inputStream = inputStream {
                 //  If we have a custom anchor, evaluate the chain of trust.  This is derived
                 //  from the Apple article found here:
                 //  https://developer.apple.com/library/archive/documentation/NetworkingInternet/Conceptual/NetworkingTopics/Articles/OverridingSSLChainValidationCorrectly.html
-                if let inputStream = inputStream, !isCertificateChainValid(stream: inputStream) {
-                    // The certificate chain did NOT check out, need to error out
-                    delegate?.streamDidError(error: aStream.streamError)
+                if isCertificateChainValid(stream: inputStream) {
+                    delegate?.newBytesInStream()
                 } else {
+                    // The certificate chain did NOT check out, need to error out
                     delegate?.streamDidError(error:
                         WSError(
                             type: .invalidSSLError,
@@ -376,9 +371,7 @@ open class FoundationStream : NSObject, WSStream, StreamDelegate  {
                             code: 0
                         )
                     )
-                    return // Stop before calling delegate?.newBytesInStream()
                 }
-                delegate?.newBytesInStream()
             }
         } else if eventCode == .errorOccurred {
             delegate?.streamDidError(error: aStream.streamError)
