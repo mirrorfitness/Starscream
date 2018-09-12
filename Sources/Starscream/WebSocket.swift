@@ -197,20 +197,6 @@ open class FoundationStream : NSObject, WSStream, StreamDelegate  {
 
                 inStream.setProperty(settings, forKey: kCFStreamPropertySSLSettings as Stream.PropertyKey)
                 outStream.setProperty(settings, forKey: kCFStreamPropertySSLSettings as Stream.PropertyKey)
-
-                //  If we have custom trust anchor(s), add them to the SSL Context for the
-                //  streams.
-#if TEST_DISABLED
-                if let trustAnchors = ssl.trustAnchors! {
-                    if let sslCtx = CFReadStreamCopyProperty(inputStream, CFStreamPropertyKey(rawValue: kCFStreamPropertySSLContext)) as! SSLContext? {
-                        let result = SSLSetCertificateAuthorities(sslCtx,
-                                                                  trustAnchors,
-                                                                  false);
-                        //  HANDLE ERROR CODE(S)
-                    }
-                }
-#endif
-            
             #endif
 
             #if os(Linux)
@@ -317,11 +303,11 @@ open class FoundationStream : NSObject, WSStream, StreamDelegate  {
 
     private func isCertificateChainValid(stream: CFReadStream) -> Bool {
         // If we have disabled cert validation, we are working with a whitelisted
-        // mirror. Return valid.
+        // mirror. Return chain as valid.
         guard ssl?.disableCertValidation == false else { return true }
         var result = false
 
-        //  Get the security trust object for the stream.  This will contain the server
+        //  Get the trust object for the stream.  This will contain the server
         //  certificate and any other certificate added by SSL.
         if let trust = CFReadStreamCopyProperty(
             stream,
@@ -364,9 +350,6 @@ open class FoundationStream : NSObject, WSStream, StreamDelegate  {
     private func addAnchor(to trust: SecTrust) {
         //  Add the anchor(s) we have to the trust then re-enable the default
         //  trust anchors from the OS.
-        //  NOTE: THE ssl.trustAnchors DATA MAY NEED TO BE CAST OR OTHERWISE PLACED
-        //        INTO A FORM THAT SecTrustSetAnchorCertificates WILL ACCEPT
-        //  TODO: ADD ERROR HANDLING
         if let trustAnchors = ssl?.trustAnchors {
             SecTrustSetAnchorCertificates(trust, trustAnchors as CFArray)
             SecTrustSetAnchorCertificatesOnly(trust, false)
