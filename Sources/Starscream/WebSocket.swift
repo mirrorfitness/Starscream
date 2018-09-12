@@ -368,6 +368,15 @@ open class FoundationStream : NSObject, WSStream, StreamDelegate  {
                 if let inputStream = inputStream, !isCertificateChainValid(stream: inputStream) {
                     // The certificate chain did NOT check out, need to error out
                     delegate?.streamDidError(error: aStream.streamError)
+                } else {
+                    delegate?.streamDidError(error:
+                        WSError(
+                            type: .invalidSSLError,
+                            message: "Invalid certificate chain",
+                            code: 0
+                        )
+                    )
+                    return // Stop before calling delegate?.newBytesInStream()
                 }
                 delegate?.newBytesInStream()
             }
