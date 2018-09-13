@@ -443,7 +443,8 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
     }
     
     private var stream: WSStream
-    private var rootCert: SecCertificate?
+    public var rootCert: SecCertificate?
+    public var rootCertError: WSError?
     private var connected = false
     private var isConnecting = false
     private let mutex = NSLock()
@@ -487,6 +488,13 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
         request.timeoutInterval = 5
         self.init(request: request, protocols: protocols)
         self.rootCert = rootCert
+        if rootCert == nil {
+            rootCertError = WSError(
+                type: .closeError,
+                message: "no  root cert provided",
+                code: 0
+            )
+        }
     }
 
     // Used for specifically setting the QOS for the write queue.
@@ -580,7 +588,14 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
      Private method that starts the connection.
      */
     private func createHTTPRequest() {
-        guard let url = request.url else {return}
+        guard let url = request.url else {
+            rootCertError = WSError(
+                type: .invalidSSLError,
+                message: "security is nil or cert is already validated",
+                code: 1
+            )
+            return
+        }
         var port = url.port
         if port == nil {
             if supportedSSLSchemes.contains(url.scheme!) {
@@ -647,7 +662,13 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
     private func initStreamsWithData(_ data: Data, _ port: Int, rootCert: SecCertificate? = nil) {
 
         guard let url = request.url else {
-            disconnectStream(nil, runDelegate: true)
+            let error = WSError(
+                type: .invalidSSLError,
+                message: "no request",
+                code: 3
+            )
+            rootCertError = error
+            disconnectStream(error, runDelegate: true)
             return
             
         }
@@ -686,7 +707,14 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
                 #if os(Linux) || os(watchOS)
                     s.certValidated = false
                 #else
-                guard let sec = s.security, !s.certValidated else { return }
+                guard let sec = s.security, !s.certValidated else {
+                    self?.rootCertError = WSError(
+                        type: .invalidSSLError,
+                        message: "security is nil or cert is already validated",
+                        code: 1
+                    )
+                    return
+                }
                 let trustObj = s.stream.sslTrust()
                 
                 if
@@ -700,17 +728,34 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
                         rootTrust,
                         domain: trustObj.domain
                     )
+                    
+                    if !s.certValidated {
+                        let error = WSError(
+                            type: .invalidSSLError,
+                            message: "cert not validated",
+                            code: 3
+                        )
+                        self?.rootCertError = error
+                        s.disconnectStream(error)
+                    }
                 } else {
+                    let error = WSError(
+                        type: .invalidSSLError,
+                        message: "error creating trust obj, accessing root cert, or adding root to trust",
+                        code: 2
+                    )
+                    self?.rootCertError = error
+                    s.disconnectStream(error)
                     s.certValidated = false
                 }
                 if !s.certValidated {
-                    s.disconnectStream(
-                        WSError(
-                            type: .invalidSSLError,
-                            message: "Invalid SSL certificate",
-                            code: 0
-                        )
+                    let error = WSError(
+                        type: .invalidSSLError,
+                        message: "Invalid SSL certificate",
+                        code: 0
                     )
+                    self?.rootCertError = error
+                    s.disconnectStream(error)
                     return
                 }
                 #endif
