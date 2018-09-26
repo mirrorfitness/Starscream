@@ -114,6 +114,7 @@ public struct SSLSettings {
     #else
     public let cipherSuites: [SSLCipherSuite]?
     #endif
+    public let trustAnchors: [SecCertificate]?
 }
 
 public protocol WSStreamDelegate: class {
@@ -140,10 +141,13 @@ open class FoundationStream : NSObject, WSStream, StreamDelegate  {
     private var outputStream: OutputStream?
     public weak var delegate: WSStreamDelegate?
     let BUFFER_MAX = 4096
-	
+	let kAnchorAlreadyAdded = "AnchorAlreadyAdded"
+    var ssl: SSLSettings?
+
 	public var enableSOCKSProxy = false
     
     public func connect(url: URL, port: Int, timeout: TimeInterval, ssl: SSLSettings, completion: @escaping ((Error?) -> Void)) {
+        self.ssl = ssl
         var readStream: Unmanaged<CFReadStream>?
         var writeStream: Unmanaged<CFWriteStream>?
         let h = url.host! as NSString
@@ -184,9 +188,29 @@ open class FoundationStream : NSObject, WSStream, StreamDelegate  {
                 if let sslClientCertificate = ssl.sslClientCertificate {
                     settings[kCFStreamSSLCertificates] = sslClientCertificate.streamSSLCertificates
                 }
-                
+
+                //  If trust anchors were added, disable normal chain validation.  Our
+                //  delegate hook for events will do the validation.
+                if let trustAnchors = ssl.trustAnchors, trustAnchors.count > 0 {
+                    settings[kCFStreamSSLValidatesCertificateChain] = NSNumber(value: false)
+                }
+
                 inStream.setProperty(settings, forKey: kCFStreamPropertySSLSettings as Stream.PropertyKey)
                 outStream.setProperty(settings, forKey: kCFStreamPropertySSLSettings as Stream.PropertyKey)
+
+                //  If we have custom trust anchor(s), add them to the SSL Context for the
+                //  streams.
+#if TEST_DISABLED
+                if let trustAnchors = ssl.trustAnchors! {
+                    if let sslCtx = CFReadStreamCopyProperty(inputStream, CFStreamPropertyKey(rawValue: kCFStreamPropertySSLContext)) as! SSLContext? {
+                        let result = SSLSetCertificateAuthorities(sslCtx,
+                                                                  trustAnchors,
+                                                                  false);
+                        //  HANDLE ERROR CODE(S)
+                    }
+                }
+#endif
+            
             #endif
 
             #if os(Linux)
@@ -270,10 +294,8 @@ open class FoundationStream : NSObject, WSStream, StreamDelegate  {
     #if os(Linux) || os(watchOS)
     #else
     public func sslTrust() -> (trust: SecTrust?, domain: String?) {
-        guard let outputStream = outputStream else { return (nil, nil) }
-
-        let trust = outputStream.property(forKey: kCFStreamPropertySSLPeerTrust as Stream.PropertyKey) as! SecTrust?
-        var domain = outputStream.property(forKey: kCFStreamSSLPeerName as Stream.PropertyKey) as! String?
+        let trust = outputStream!.property(forKey: kCFStreamPropertySSLPeerTrust as Stream.PropertyKey) as! SecTrust?
+        var domain = outputStream!.property(forKey: kCFStreamSSLPeerName as Stream.PropertyKey) as? String
         if domain == nil,
             let sslContextOut = CFWriteStreamCopyProperty(outputStream, CFStreamPropertyKey(rawValue: kCFStreamPropertySSLContext)) as! SSLContext? {
             var peerNameLen: Int = 0
@@ -290,13 +312,78 @@ open class FoundationStream : NSObject, WSStream, StreamDelegate  {
         return (trust, domain)
     }
     #endif
-    
+
+    private func isCertificateChainValid(stream: CFReadStream) -> Bool {
+        // If we have disabled cert validation, we are working with a whitelisted
+        // mirror. Return valid.
+        guard ssl?.disableCertValidation == false else { return true }
+        var result = false
+
+        //  Get the security trust object for the stream.  This will contain the server
+        //  certificate and any other certificate added by SSL.
+        if let trust = CFReadStreamCopyProperty(
+            stream,
+            CFStreamPropertyKey(rawValue: kCFStreamPropertySSLPeerTrust)) as! SecTrust? {
+
+            //  See if our trust has already been added for this stream.  If it has not,
+            //  then add it now then mark in the stream that we have added our anchors(s).
+            var anchorAdded: NSNumber? = CFReadStreamCopyProperty(
+                stream,
+                CFStreamPropertyKey(kAnchorAlreadyAdded as CFString)
+            ) as? NSNumber
+
+            if anchorAdded == nil || anchorAdded == 0 {
+                addAnchor(to: trust)
+                anchorAdded = 1
+                
+                inputStream?.setProperty(
+                    anchorAdded,
+                    forKey: Stream.PropertyKey(kAnchorAlreadyAdded)
+                )
+
+                outputStream?.setProperty(
+                    anchorAdded,
+                    forKey: Stream.PropertyKey(kAnchorAlreadyAdded)
+                )
+            }
+
+            //  Now evaluate the certificate chain of trust
+            var status: SecTrustResultType = .unspecified
+            SecTrustEvaluate(trust, &status)
+            if (status == .unspecified) ||
+               (status == .proceed) {
+                result = true
+            }
+        }
+
+        return result
+    }
+
+    private func addAnchor(to trust: SecTrust) {
+        //  Add the anchor(s) we have to the trust then re-enable the default
+        //  trust anchors from the OS.
+        //  NOTE: THE ssl.trustAnchors DATA MAY NEED TO BE CAST OR OTHERWISE PLACED
+        //        INTO A FORM THAT SecTrustSetAnchorCertificates WILL ACCEPT
+        //  TODO: ADD ERROR HANDLING
+        if let trustAnchors = ssl?.trustAnchors {
+            SecTrustSetAnchorCertificates(trust, trustAnchors as CFArray)
+            SecTrustSetAnchorCertificatesOnly(trust, false)
+        }
+    }
+
     /**
      Delegate for the stream methods. Processes incoming bytes
      */
     open func stream(_ aStream: Stream, handle eventCode: Stream.Event) {
         if eventCode == .hasBytesAvailable {
             if aStream == inputStream {
+                //  If we have a custom anchor, evaluate the chain of trust.  This is derived
+                //  from the Apple article found here:
+                //  https://developer.apple.com/library/archive/documentation/NetworkingInternet/Conceptual/NetworkingTopics/Articles/OverridingSSLChainValidationCorrectly.html
+                if let inputStream = inputStream, !isCertificateChainValid(stream: inputStream) {
+                    // The certificate chain did NOT check out, need to error out
+                    delegate?.streamDidError(error: aStream.streamError)
+                }
                 delegate?.newBytesInStream()
             }
         } else if eventCode == .errorOccurred {
@@ -410,6 +497,9 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
     public var overrideTrustHostname = false
     public var desiredTrustHostname: String? = nil
     public var sslClientCertificate: SSLClientCertificate? = nil
+
+    //  Trust Anchor (public) certificates to add to the default trust
+    public var trustAnchors: [SecCertificate]? = nil
 
     public var enableCompression = true
     #if os(Linux)
@@ -657,15 +747,17 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
             let settings = SSLSettings(useSSL: useSSL,
                                        disableCertValidation: disableSSLCertValidation,
                                        overrideTrustHostname: overrideTrustHostname,
-                                       desiredTrustHostname: desiredTrustHostname),
-                                       sslClientCertificate: sslClientCertificate
+                                       desiredTrustHostname: desiredTrustHostname,
+                                       trustAnchors: trustAnchors,
+                                       sslClientCertificate: sslClientCertificate)
         #else
             let settings = SSLSettings(useSSL: useSSL,
                                        disableCertValidation: disableSSLCertValidation,
                                        overrideTrustHostname: overrideTrustHostname,
                                        desiredTrustHostname: desiredTrustHostname,
                                        sslClientCertificate: sslClientCertificate,
-                                       cipherSuites: self.enabledSSLCipherSuites)
+                                       cipherSuites: enabledSSLCipherSuites,
+                                       trustAnchors: trustAnchors)
         #endif
         certValidated = !useSSL
         let timeout = request.timeoutInterval * 1_000_000
