@@ -162,7 +162,7 @@ open class FoundationStream : NSObject, WSStream, StreamDelegate  {
                 let socksConfig = CFDictionaryCreateMutableCopy(nil, 0, CFNetworkCopySystemProxySettings()!.takeRetainedValue()) as! [String: Any]
                 let propertyKey = CFStreamPropertyKey(rawValue: kCFStreamPropertySOCKSProxy)
                 let ip = socksConfig["HTTPSProxy"]
-                let proxySocksConfig = ["SOCKSProxy": ip, "SOCKSPort": SOCKSProxyPort, "SOCKSEnable": true] as CFDictionary // Where 8889 is the SOCKS proxy port in Charles
+                let proxySocksConfig = ["SOCKSProxy": ip, "SOCKSPort": SOCKSProxyPort, "SOCKSEnable": true] as CFDictionary
                 CFWriteStreamSetProperty(outputStream, propertyKey, proxySocksConfig)
                 CFReadStreamSetProperty(inputStream, propertyKey, proxySocksConfig)
                 
@@ -506,11 +506,11 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
         return isConnected
     }
     
-    public var isProxyUsed: Bool {
-        let systemProxySettings = [(NSDictionary *) CFNetworkCopySystemProxySettings() autorelease];
-        let proxies = [(NSArray *) CFNetworkCopyProxiesForURL((CFURLRef) URL, (CFDictionaryRef) systemProxySettings) autorelease];
+    public var isProxyEnabled: Bool {
+        let socksConfig = CFDictionaryCreateMutableCopy(nil, 0, CFNetworkCopySystemProxySettings()!.takeRetainedValue()) as! [String: Any]
+        let ip = socksConfig["HTTPSProxy"]
 
-        return proxies.count > 0
+        return ip != nil
     }
     
     public var request: URLRequest //this is only public to allow headers, timeout, etc to be modified on reconnect
