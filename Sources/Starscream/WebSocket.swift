@@ -541,6 +541,8 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
     
     /// Used for setting protocols.
     public init(request: URLRequest, protocols: [String]? = nil, stream: WSStream = FoundationStream()) {
+        debugPrint("======================== Starscream")
+        
         self.request = request
         self.stream = stream
         if request.value(forHTTPHeaderField: headerOriginName) == nil {
@@ -578,7 +580,6 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
         didDisconnect = false
         isConnecting = true
         createHTTPRequest()
-        debugPrint("======================== Starscream")
     }
 
     /**
