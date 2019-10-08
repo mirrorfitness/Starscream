@@ -578,6 +578,7 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
         didDisconnect = false
         isConnecting = true
         createHTTPRequest()
+        debugPrint("======================== Starscream")
     }
 
     /**
