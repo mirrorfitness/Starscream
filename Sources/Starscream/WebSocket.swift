@@ -166,7 +166,7 @@ open class FoundationStream : NSObject, WSStream, StreamDelegate  {
                 CFWriteStreamSetProperty(outputStream, propertyKey, proxySocksConfig)
                 CFReadStreamSetProperty(inputStream, propertyKey, proxySocksConfig)
                 
-                debugPrint("used proxy: \($ip):\($SOCKSProxyPort)")
+                debugPrint("used proxy: \(ip ?? ""):\(SOCKSProxyPort)")
             }
         #endif
         
