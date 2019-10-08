@@ -162,11 +162,14 @@ open class FoundationStream : NSObject, WSStream, StreamDelegate  {
             if enableSOCKSProxy {
                 debugPrint("======================== Starscream: stream proxy used")
                 
-                let proxyDict = CFNetworkCopySystemProxySettings()
-                let socksConfig = CFDictionaryCreateMutableCopy(nil, 0, proxyDict!.takeRetainedValue())
+                let socksConfig = CFDictionaryCreateMutableCopy(nil, 0, CFNetworkCopySystemProxySettings()!.takeRetainedValue()) as! [String: Any]
                 let propertyKey = CFStreamPropertyKey(rawValue: kCFStreamPropertySOCKSProxy)
-                CFWriteStreamSetProperty(outputStream, propertyKey, socksConfig)
-                CFReadStreamSetProperty(inputStream, propertyKey, socksConfig)
+                let ip = socksConfig["HTTPSProxy"]
+                let proxySocksConfig = ["SOCKSProxy": ip, "SOCKSPort": 8889, "SOCKSEnable": true] as CFDictionary // Where 8889 is the SOCKS proxy port in Charles
+                CFWriteStreamSetProperty(outputStream, propertyKey, proxySocksConfig)
+                CFReadStreamSetProperty(inputStream, propertyKey, proxySocksConfig)
+                
+                debugPrint("used proxy: \(ip):8889")
             }
         #endif
         
