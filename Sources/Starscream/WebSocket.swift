@@ -145,10 +145,9 @@ open class FoundationStream : NSObject, WSStream, StreamDelegate  {
     var ssl: SSLSettings?
 
 	public var enableSOCKSProxy = false
+    public var SOCKSProxyPort = 8889
     
     public func connect(url: URL, port: Int, timeout: TimeInterval, ssl: SSLSettings, completion: @escaping ((Error?) -> Void)) {
-        debugPrint("======================== Starscream: stream connect")
-        
         self.ssl = ssl
         var readStream: Unmanaged<CFReadStream>?
         var writeStream: Unmanaged<CFWriteStream>?
@@ -160,12 +159,10 @@ open class FoundationStream : NSObject, WSStream, StreamDelegate  {
         #if os(watchOS) //watchOS us unfortunately is missing the kCFStream properties to make this work
         #else
             if enableSOCKSProxy {
-                debugPrint("======================== Starscream: stream proxy used")
-                
                 let socksConfig = CFDictionaryCreateMutableCopy(nil, 0, CFNetworkCopySystemProxySettings()!.takeRetainedValue()) as! [String: Any]
                 let propertyKey = CFStreamPropertyKey(rawValue: kCFStreamPropertySOCKSProxy)
                 let ip = socksConfig["HTTPSProxy"]
-                let proxySocksConfig = ["SOCKSProxy": ip, "SOCKSPort": 8889, "SOCKSEnable": true] as CFDictionary // Where 8889 is the SOCKS proxy port in Charles
+                let proxySocksConfig = ["SOCKSProxy": ip, "SOCKSPort": SOCKSProxyPort, "SOCKSEnable": true] as CFDictionary // Where 8889 is the SOCKS proxy port in Charles
                 CFWriteStreamSetProperty(outputStream, propertyKey, proxySocksConfig)
                 CFReadStreamSetProperty(inputStream, propertyKey, proxySocksConfig)
                 
@@ -508,6 +505,14 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
         mutex.unlock()
         return isConnected
     }
+    
+    public var isProxyUsed: Bool {
+        let systemProxySettings = [(NSDictionary *) CFNetworkCopySystemProxySettings() autorelease];
+        let proxies = [(NSArray *) CFNetworkCopyProxiesForURL((CFURLRef) URL, (CFDictionaryRef) systemProxySettings) autorelease];
+
+        return proxies.count > 0
+    }
+    
     public var request: URLRequest //this is only public to allow headers, timeout, etc to be modified on reconnect
     public var currentURL: URL { return request.url! }
 
@@ -548,8 +553,6 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
     
     /// Used for setting protocols.
     public init(request: URLRequest, protocols: [String]? = nil, stream: WSStream = FoundationStream()) {
-        debugPrint("======================== Starscream: init")
-        
         self.request = request
         self.stream = stream
         if request.value(forHTTPHeaderField: headerOriginName) == nil {
@@ -587,8 +590,6 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
         didDisconnect = false
         isConnecting = true
         createHTTPRequest()
-        
-        debugPrint("======================== Starscream: ws connect")
     }
 
     /**
