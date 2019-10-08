@@ -147,6 +147,8 @@ open class FoundationStream : NSObject, WSStream, StreamDelegate  {
 	public var enableSOCKSProxy = false
     
     public func connect(url: URL, port: Int, timeout: TimeInterval, ssl: SSLSettings, completion: @escaping ((Error?) -> Void)) {
+        debugPrint("======================== Starscream: stream connect")
+        
         self.ssl = ssl
         var readStream: Unmanaged<CFReadStream>?
         var writeStream: Unmanaged<CFWriteStream>?
@@ -158,6 +160,8 @@ open class FoundationStream : NSObject, WSStream, StreamDelegate  {
         #if os(watchOS) //watchOS us unfortunately is missing the kCFStream properties to make this work
         #else
             if enableSOCKSProxy {
+                debugPrint("======================== Starscream: stream proxy used")
+                
                 let proxyDict = CFNetworkCopySystemProxySettings()
                 let socksConfig = CFDictionaryCreateMutableCopy(nil, 0, proxyDict!.takeRetainedValue())
                 let propertyKey = CFStreamPropertyKey(rawValue: kCFStreamPropertySOCKSProxy)
@@ -541,7 +545,7 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
     
     /// Used for setting protocols.
     public init(request: URLRequest, protocols: [String]? = nil, stream: WSStream = FoundationStream()) {
-        debugPrint("======================== Starscream")
+        debugPrint("======================== Starscream: init")
         
         self.request = request
         self.stream = stream
@@ -580,6 +584,8 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
         didDisconnect = false
         isConnecting = true
         createHTTPRequest()
+        
+        debugPrint("======================== Starscream: ws connect")
     }
 
     /**
