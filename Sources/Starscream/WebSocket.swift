@@ -1306,6 +1306,7 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
     private func dequeueWrite(_ data: Data, code: OpCode, writeCompletion: (() -> ())? = nil) {
         let operation = BlockOperation()
         operation.addExecutionBlock { [weak self, weak operation] in
+debugPrint(">>> LJS <<< ss write op START")
             //stream isn't ready, let's wait
             guard let self = self else { return }
             guard let sOperation = operation else { return }
@@ -1372,6 +1373,7 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
                     break
                 }
             }
+debugPrint(">>> LJS <<< ss write op END")
         }
         writeQueue.addOperation(operation)
     }
