@@ -140,18 +140,11 @@ open class FoundationStream : NSObject, WSStream, StreamDelegate  {
     private var inputStream: InputStream?
     private var outputStream: OutputStream?
     public weak var delegate: WSStreamDelegate?
+    let BUFFER_MAX = 4096
+    let kAnchorAlreadyAdded = "AnchorAlreadyAdded"
     var ssl: SSLSettings?
     
     public var enableSOCKSProxy = false
-    public var SOCKSProxyPort = 8889
-    
-    // MARK: - Constants
-    let BUFFER_MAX: Int                 = 4096
-    let kAnchorAlreadyAdded: String     = "AnchorAlreadyAdded"
-    let httpsProxyKey: String           = "HTTPSProxy"
-    let socksProxyIpKey: String         = "SOCKSProxy"
-    let socksProxyPortKey: String       = "SOCKSPort"
-    let socksProxyEnabledKey: String    = "SOCKSEnable"
     
     public func connect(url: URL, port: Int, timeout: TimeInterval, ssl: SSLSettings, completion: @escaping ((Error?) -> Void)) {
         self.ssl = ssl
@@ -165,14 +158,11 @@ open class FoundationStream : NSObject, WSStream, StreamDelegate  {
         #if os(watchOS) //watchOS us unfortunately is missing the kCFStream properties to make this work
         #else
         if enableSOCKSProxy {
-            let socksConfig = CFDictionaryCreateMutableCopy(nil, 0, CFNetworkCopySystemProxySettings()!.takeRetainedValue()) as! [String: Any]
+            let proxyDict = CFNetworkCopySystemProxySettings()
+            let socksConfig = CFDictionaryCreateMutableCopy(nil, 0, proxyDict!.takeRetainedValue())
             let propertyKey = CFStreamPropertyKey(rawValue: kCFStreamPropertySOCKSProxy)
-            let ip = socksConfig[httpsProxyKey]
-            let proxySocksConfig = [socksProxyIpKey: ip, socksProxyPortKey: SOCKSProxyPort, socksProxyEnabledKey: true] as CFDictionary
-            CFWriteStreamSetProperty(outputStream, propertyKey, proxySocksConfig)
-            CFReadStreamSetProperty(inputStream, propertyKey, proxySocksConfig)
-            
-            debugPrint("used proxy: \(ip ?? ""):\(SOCKSProxyPort)")
+            CFWriteStreamSetProperty(outputStream, propertyKey, socksConfig)
+            CFReadStreamSetProperty(inputStream, propertyKey, socksConfig)
         }
         #endif
         
